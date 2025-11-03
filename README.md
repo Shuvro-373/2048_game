@@ -1,206 +1,271 @@
-# Getting Started with 2048
+# 🎮 DevSecOps: Deploying the 2048 Game on Docker and Kubernetes with Jenkins CI/CD
 
-This game (2048) was built using **React** and **TypeScript**. The unique part of this example is animations. The animations in React aren't that straightforward, so I hope you can learn something new from it.
+---
+
+## 📘 Project Overview
+
+This project demonstrates the **end-to-end implementation of a secure CI/CD DevSecOps pipeline** for deploying the **2048 Game**, a web-based puzzle application, using **Jenkins**, **Docker**, and **Kubernetes** on **AWS EC2** instances.
+
+The pipeline ensures **continuous integration, continuous delivery, automated security scanning**, and **real-time Kubernetes cluster monitoring** using **Prometheus** and **Grafana**.
+
+---
+
+## 🧩 Tech Stack
+
+| Category | Tools & Technologies |
+|-----------|----------------------|
+| **Version Control** | Git & GitHub |
+| **CI/CD Orchestration** | Jenkins |
+| **Code Quality Analysis** | SonarQube |
+| **Dependency Security** | OWASP Dependency-Check |
+| **Container Security** | Trivy |
+| **Containerization** | Docker |
+| **Orchestration & Deployment** | Kubernetes (kubeadm setup) |
+| **Monitoring & Visualization** | Prometheus + Grafana |
+| **Cloud Infrastructure** | AWS EC2 (Ubuntu 24.04 LTS) |
+| **Programming Language** | Python / Node.js |
+| **Web Server** | NGINX |
+
+---
+
+## 🧱 Architecture Diagram
+
+          ┌────────────────────────────┐
+          │        GitHub Repo         │
+          │     (2048 Game Source)     │
+          └────────────┬───────────────┘
+                       │
+                       ▼
+          ┌────────────────────────────┐
+          │         Jenkins CI/CD       │
+          │   Builds | Scans | Deploys  │
+          └────────────┬───────────────┘
+                       │
+                       ▼
+          ┌────────────────────────────┐
+          │      Docker Hub Images      │
+          └────────────┬───────────────┘
+                       │
+                       ▼
+          ┌────────────────────────────┐
+          │  Kubernetes Cluster (AWS)  │
+          │ Master + Worker Nodes      │
+          └────────────┬───────────────┘
+                       │
+                       ▼
+          ┌────────────────────────────┐
+          │ Prometheus + Grafana Stack │
+          │ (Monitoring & Dashboards)  │
+          └────────────────────────────┘
+
+## 📜 Complete Jenkins Declarative Pipeline
+
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk21'
+        nodejs 'nodejs24'
+    }
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                git 'https://github.com/Shuvro-373/2048_game.git'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectKey=Game \
+                        -Dsonar.projectName=Game'''
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm install'
+            }
+        }
+
+        stage('OWASP Dependency-Check') {
+            steps {
+                dependencyCheck additionalArguments: '--scan . --format XML', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                archiveArtifacts artifacts: '**/dependency-check-report.*', onlyIfSuccessful: true
+            }
+        }
+
+        stage('Trivy Filesystem Scan') {
+            steps {
+                sh '''
+                    trivy fs . \
+                    --format table \
+                    --severity HIGH,CRITICAL \
+                    --no-progress > trivyfs.txt
+                '''
+                archiveArtifacts artifacts: 'trivyfs.txt', onlyIfSuccessful: true
+            }
+        }
+
+        stage("Docker Build & Push") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'dockerhub-creds') {
+                        sh '''
+                            docker build -t 2048 .
+                            docker tag 2048 shuvro373/2048:latest
+                            docker push shuvro373/2048:latest
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage("Trivy Image Scan") {
+            steps {
+                sh '''
+                    trivy image shuvro373/2048:latest \
+                    --severity HIGH,CRITICAL \
+                    --format table \
+                    --no-progress > trivy.txt
+                '''
+                archiveArtifacts artifacts: 'trivy.txt', onlyIfSuccessful: true
+            }
+        }
+
+                stage('Deploy to container') {
+            steps {
+                sh '''
+                    docker rm -f 2048 || true
+                    docker run -d --name 2048 -p 3000:3000 shuvro373/2048:latest
+                '''
+            }
+        }
+
+        stage('Deploy to kubernets'){
+            steps{
+                script{
+                    withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'k8s', namespace: '', restrictKubeConfigAccess: false, serverUrl: '') {
+                       sh 'kubectl apply -f deployment.yaml'
+                  }
+                }
+            }
+        }
+    }
+}
+
+⚙️ Pipeline Workflow
+
+1️⃣ Code Checkout
+	•	Jenkins automatically clones the latest code from GitHub: git url: 'https://github.com/Shuvro-373/2048_game', branch: 'master'
+
+⸻
+
+2️⃣ SonarQube Analysis
+	•	Scans the source code for bugs, code smells, and vulnerabilities.
+	•	Ensures code quality using the SonarQube server integrated with Jenkins.
+
+⸻
+
+3️⃣ OWASP Dependency Check
+	•	Detects insecure or outdated dependencies.
+	•	Generates an HTML and XML report for dependency vulnerabilities.
+
+⸻
+
+4️⃣ Trivy Filesystem & Image Scan
+	•	Scans the code directory for HIGH/CRITICAL vulnerabilities: trivy fs .
+	•	Scans the Docker image after build: trivy image shuvro373/2048:latest
+
+⸻
+
+5️⃣ Docker Build & Push
+	•	Jenkins builds and pushes the Docker image to Docker Hub: docker build -t shuvro373/2048:latest .
+                                                              docker push shuvro373/2048:latest
+⸻
+
+6️⃣ Kubernetes Deployment
+	•	Jenkins applies the manifests:kubectl apply -f deployment.yaml
+                                  kubectl apply -f service.yaml
+  •	The 2048 Game runs as a Kubernetes Deployment exposed via NodePort.
 
 
-## Available Scripts
 
-In the project directory, you can run:
+⸻
 
-### `yarn start`
+7️⃣ Prometheus & Grafana Monitoring
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+🟦 Prometheus:
+	•	Installed on the same EC2 instance as the K8s Master.
+	•	Collects metrics from:
+	•	Node Exporter (for system metrics)
+	•	Kube-State-Metrics (for pod/deployment state)
+	•	Jenkins metrics endpoint
+	•	Prometheus itself
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+🟩 Grafana:
+	•	Connected to Prometheus as a data source.
+	•	Displays dashboards for:
+	•	Node resource usage
+	•	Pod performance
+	•	Jenkins health
+	•	Kubernetes service uptime
 
-### `yarn build`
+⸻
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+🧠 Prometheus Configuration Example
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+  - job_name: 'node_exporter_master'
+    static_configs:
+      - targets: ['3.84.40.40:9100']
 
-## Learn More
+  - job_name: 'node_exporter_worker'
+    static_configs:
+      - targets: ['3.84.24.56:9100']
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+  - job_name: 'jenkins'
+    metrics_path: '/prometheus'
+    static_configs:
+      - targets: ['13.219.84.38:8080']
 
-To learn React, check out the [React documentation](https://reactjs.org/).
-# 2048-React-CICD
-#k8s_worker_node.sh
-#!/bin/bash
-set -e
+  - job_name: 'kube-state-metrics'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['3.84.40.40:32555']
 
-# Set hostname
-sudo hostnamectl set-hostname K8s-Worker
+📊 Grafana Dashboards
 
-# Disable swap
-sudo swapoff -a
-sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+You visualized:
+	•	CPU & memory usage per node/pod
+	•	Cluster-wide uptime
+	•	Jenkins job performance
+	•	2048 Game service response health
 
-# Load required modules
-cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf
-overlay
-br_netfilter
-EOF
+⸻
 
-sudo modprobe overlay
-sudo modprobe br_netfilter
+🧾 Project Achievements
 
-# Set system parameters for Kubernetes networking
-cat <<EOT | sudo tee /etc/sysctl.d/kubernetes.conf
-net.bridge.bridge-nf-call-ip6tables = 1
-net.bridge.bridge-nf-call-iptables = 1
-net.ipv4.ip_forward = 1
-EOT
-
-sudo sysctl --system
-
-# Install containerd
-sudo apt update
-sudo apt install -y curl gnupg2 software-properties-common apt-transport-https ca-certificates
-
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg
-sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-sudo apt update
-sudo apt install -y containerd.io
-
-# Configure containerd to use systemd cgroup
-sudo containerd config default | sudo tee /etc/containerd/config.toml >/dev/null 2>&1
-sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
-sudo systemctl restart containerd
-sudo systemctl enable containerd
-
-# Add Kubernetes repository
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-
-# Install Kubernetes components
-sudo apt update
-sudo apt install -y kubelet kubeadm kubectl
-sudo apt-mark hold kubelet kubeadm kubectl
-ubuntu@K8s-Worker:~$ sudo nano worker.sh 
-ubuntu@K8s-Worker:~$ sudo vim worker.sh 
-ubuntu@K8s-Worker:~$ cat worker.sh 
-#!/bin/bash
-set -e
-
-# Set hostname
-sudo hostnamectl set-hostname K8s-Worker
-
-# Disable swap
-sudo swapoff -a
-sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
-
-# Load required modules
-cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf
-overlay
-br_netfilter
-EOF
-
-sudo modprobe overlay
-sudo modprobe br_netfilter
-
-# Set system parameters for Kubernetes networking
-cat <<EOT | sudo tee /etc/sysctl.d/kubernetes.conf
-net.bridge.bridge-nf-call-ip6tables = 1
-net.bridge.bridge-nf-call-iptables = 1
-net.ipv4.ip_forward = 1
-EOT
-
-sudo sysctl --system
-
-# Install containerd
-sudo apt update
-sudo apt install -y curl gnupg2 software-properties-common apt-transport-https ca-certificates
-
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg
-sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-sudo apt update
-sudo apt install -y containerd.io
-
-# Configure containerd to use systemd cgroup
-sudo containerd config default | sudo tee /etc/containerd/config.toml >/dev/null 2>&1
-sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
-sudo systemctl restart containerd
-sudo systemctl enable containerd
-
-# Add Kubernetes repository
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-
-# Install Kubernetes components
-sudo apt updat:e
-sudo apt install -y kubelet kubeadm kubectl
-sudo apt-mark hold kubelet kubeadm kubectl
-#k8s_master_node.sh
-#!/bin/bash
-set -e
-
-# Set hostname
-sudo hostnamectl set-hostname K8s-Master
-
-# Disable swap
-sudo swapoff -a
-sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
-
-# Load kernel modules
-cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf
-overlay
-br_netfilter
-EOF
-
-sudo modprobe overlay
-sudo modprobe br_netfilter
-
-# Set sysctl params
-cat <<EOT | sudo tee /etc/sysctl.d/kubernetes.conf
-net.bridge.bridge-nf-call-ip6tables = 1
-net.bridge.bridge-nf-call-iptables = 1
-net.ipv4.ip_forward = 1
-EOT
-
-sudo sysctl --system
-
-# Install dependencies
-sudo apt update
-sudo apt install -y curl gnupg2 software-properties-common apt-transport-https ca-certificates
-
-# Add Docker repo and install containerd
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/docker.gpg
-sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-sudo apt update
-sudo apt install -y containerd.io
-
-# Configure containerd
-sudo containerd config default | sudo tee /etc/containerd/config.toml >/dev/null 2>&1
-sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
-sudo systemctl restart containerd
-sudo systemctl enable containerd
-
-# Add Kubernetes repo
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-
-# Install Kubernetes tools
-sudo apt update
-sudo apt install -y kubelet kubeadm kubectl
-sudo apt-mark hold kubelet kubeadm kubectl
-
-# Initialize the master node
-sudo kubeadm init --ignore-preflight-errors=all
-
-# Set up kubeconfig for kubectl
-mkdir -p $HOME/.kube
-sudo cp /etc/kubernetes/admin.conf $HOME/.kube/config
-sudo chown $(id -u):$(id -g) $HOME/.kube/config
-
-# Install Calico network plugin
-kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml
+✅ Fully automated CI/CD with Jenkins
+✅ Code & image security scanning with SonarQube, OWASP, and Trivy
+✅ Containerized 2048 game deployed to Kubernetes
+✅ Real-time monitoring using Prometheus & Grafana
+✅ Scalable, cloud-native infrastructure using AWS EC2
